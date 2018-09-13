@@ -71,15 +71,25 @@ func singleJoiningSlash(a, b string) string {
 	return a + b
 }
 
+// Two subdomains point to this IP. As such we need to determine where they need to be directed.
+func interceptPath(url *url.URL, host string) string {
+	// URL host is often empty.
+	if !strings.Contains(host, "kathryn") {
+		return url.Path
+	}
+	return filepath.Join("kcawd", url.Path)
+}
+
 func newMultiHostReverseProxy(hosts []*url.URL) *httputil.ReverseProxy {
 	// Remnant of SingleHostReverseProxy.
 	targetQuery := ""
 	i := 0
 	director := func(req *http.Request) {
 		var target = getNext(hosts, &i)
+		path := interceptPath(req.URL, req.Host)
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
-		req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
+		req.URL.Path = singleJoiningSlash(target.Path, path)
 		if targetQuery == "" || req.URL.RawQuery == "" {
 			req.URL.RawQuery = targetQuery + req.URL.RawQuery
 		} else {
