@@ -178,7 +178,7 @@ func main() {
 		server := &http.Server{
 			Handler: handler,
 			ReadTimeout:    2 * time.Second,
-			WriteTimeout:   10 * time.Second,
+			WriteTimeout:   30 * time.Second,
 			TLSConfig: tlsConfig,
 		}
 		server.ListenAndServeTLS("", "")
