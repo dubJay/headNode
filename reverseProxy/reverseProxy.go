@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,6 +25,10 @@ var (
 	port        = flag.String("port", ":8080", "Port for server to listen on")
 	rootDir     = flag.String("rootDir", "", "Path to webdir structure")
 	ssl         = flag.Bool("ssl", false, "Whether to use TLS")
+
+	// Optional secondary TLS info.
+	secondCert        = flag.String("secondCert", "", "Concatenation of server's certificate and any intermediates.")
+	secondKey         = flag.String("secondKey", "", "Private key for TLS")
 )
 
 // Simple round robin queue. ATM all backend comps have equal compute power.
@@ -74,10 +79,13 @@ func singleJoiningSlash(a, b string) string {
 // Two subdomains point to this IP. As such we need to determine where they need to be directed.
 func interceptPath(url *url.URL, host string) string {
 	// URL host is often empty.
-	if !strings.Contains(host, "kathryn") {
-		return url.Path
+	if strings.Contains(host, "unofficialscp") {
+		return filepath.Join("scp", url.Path)
 	}
-	return filepath.Join("kcawd", url.Path)
+	if strings.Contains(host, "kathryn") {
+		return filepath.Join("kcawd", url.Path)
+	}
+	return url.Path
 }
 
 func newMultiHostReverseProxy(hosts []*url.URL) *httputil.ReverseProxy {
@@ -145,11 +153,34 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", newMultiHostReverseProxy(queue).ServeHTTP)
 	
-
 	if !*ssl {
 		log.Fatal(http.ListenAndServe(*port, mux))
 	} else {
 		go http.ListenAndServe(":80", http.HandlerFunc(redirect))
-		log.Fatal(http.ListenAndServeTLS(*port, *cert, *key, handlers.CombinedLoggingHandler(file, mux)))
+
+		handler := handlers.CombinedLoggingHandler(file, mux)
+		if len(*secondCert) == 0 || len(*secondKey) == 0 {
+			log.Fatal(http.ListenAndServeTLS(*port, *cert, *key, handler))
+		}
+
+		tlsConfig := &tls.Config{}
+		tlsConfig.Certificates = make([]tls.Certificate, 2)
+		tlsConfig.Certificates[0], err = tls.LoadX509KeyPair(*cert, *key)
+		if err != nil {
+			log.Fatal(err)
+		}
+		tlsConfig.Certificates[1], err = tls.LoadX509KeyPair(*secondCert, *secondKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+		tlsConfig.BuildNameToCertificate()
+
+		server := &http.Server{
+			Handler: handler,
+			ReadTimeout:    2 * time.Second,
+			WriteTimeout:   10 * time.Second,
+			TLSConfig: tlsConfig,
+		}
+		server.ListenAndServeTLS("", "")
 	}
 }
